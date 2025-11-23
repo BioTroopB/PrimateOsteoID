@@ -1,4 +1,4 @@
-# app.py — OsteoID.ai v2.0 (Hylobates-proof + faster + prettier)
+# app.py
 import streamlit as st
 import trimesh
 import numpy as np
@@ -8,11 +8,36 @@ from scipy.spatial.distance import cdist
 from scipy.spatial import procrustes
 import os
 
+# CONFIG
 st.set_page_config(page_title="OsteoID.ai", layout="centered")
-st.title("OsteoID.ai")
-st.markdown("**Primate Pectoral Girdle Classifier** — Kevin P. Klier | UB BHEML")
+st.title("🦴 OsteoID.ai")
+st.markdown("**Primate Pectoral Girdle Classifier** — Kevin P. Klier")
 st.markdown("*Upload any raw `.ply` file — no landmarking required · Auto-landmarking via ICP*")
 
+# CACHING
+@st.cache_resource
+def load_bone_models(bone_type):
+    base_path = f"models/{bone_type}"
+    if not os.path.exists(base_path):
+        st.error(f"Models for {bone_type} not found. Check your repo structure.")
+        st.stop()
+    
+    with open(f"{base_path}/mean_shape_{bone_type}.pkl", "rb") as f:
+        mean_shape = pickle.load(f)
+    with open(f"{base_path}/model_sex_{bone_type}.pkl", "rb") as f:
+        model_sex = pickle.load(f)
+    with open(f"{base_path}/model_side_{bone_type}.pkl", "rb") as f:
+        model_side = pickle.load(f)
+    with open(f"{base_path}/model_species_{bone_type}.pkl", "rb") as f:
+        model_species = pickle.load(f)
+    with open(f"{base_path}/le_species_{bone_type}.pkl", "rb") as f:
+        le_species = pickle.load(f)
+    with open(f"{base_path}/pca_{bone_type}.pkl", "rb") as f:
+        pca = pickle.load(f)
+    
+    return mean_shape, model_sex, model_side, model_species, le_species, pca
+
+# UI
 bone = st.selectbox("Bone type (or Auto-detect)", ["Auto", "clavicle", "scapula", "humerus"])
 uploaded_file = st.file_uploader("Upload raw .ply file", type="ply")
 
@@ -20,101 +45,95 @@ if uploaded_file is not None:
     try:
         mesh = trimesh.load(uploaded_file, file_type="ply", force="mesh")
     except Exception as e:
-        st.error(f"Could not load PLY file: {e}")
+        st.error(f"Failed to load PLY file. Error: {e}")
         st.stop()
 
     verts = np.asarray(mesh.vertices)
     st.write(f"Mesh loaded · {len(verts):,} vertices")
 
-    # Auto-detect bone by vertex count (tuned for your data)
+    # Auto-detect bone
     if bone == "Auto":
-        if len(verts) < 2_500:
+        if len(verts) < 2_000:
             bone = "clavicle"
-        elif len(verts) < 8_000:
+        elif len(verts) < 6_000:
             bone = "scapula"
         else:
             bone = "humerus"
         st.info(f"Auto-detected as **{bone.capitalize()}**")
 
-    # Load models (cached for speed)
-    @st.cache_resource
-    def load_models(b):
-        folder = f"models/{b}"
-        return (
-            pickle.load(open(f"{folder}/mean_shape_{b}.pkl", "rb")),
-            pickle.load(open(f"{folder}/model_sex_{b}.pkl", "rb")),
-            pickle.load(open(f"{folder}/model_side_{b}.pkl", "rb")),
-            pickle.load(open(f"{folder}/model_species_{b}.pkl", "rb")),
-            pickle.load(open(f"{folder}/le_species_{b}.pkl", "rb")),
-            pickle.load(open(f"{folder}/pca_{b}.pkl", "rb")),
-        )
+    # Load all models for this bone (cached!)
+    mean_shape, model_sex, model_side, model_species, le_species, pca = load_bone_models(bone)
 
-    mean_shape, model_sex, model_side, model_species, le_species, pca = load_models(bone)
+    # ICP + ALIGNMENT
+    @st.cache_data
+    def auto_landmark_and_predict(_verts, _mean_shape, _pca):
+        # Subsample for speed
+        idx = np.random.choice(len(_verts), size=min(1000, len(_verts)), replace=False)
+        sample = _verts[idx]
 
-    # ROBUST ICP — fixes Hylobates/low-res crash
-    def robust_icp(source, target, max_iters=40):
-        src = source.copy()
-        n_target = target.shape[0]
+        # Simple fast ICP
+        def simple_icp(src, tgt, iters=30):
+            s = src.copy()
+            for _ in range(iters):
+                dists = cdist(s, tgt)
+                correspondences = tgt[np.argmin(dists, axis=1)]
+                _, s, _ = procrustes(correspondences, s)
+            return s
 
-        # Ensure we have at least as many points as landmarks
-        if len(src) < n_target:
-            extra_idx = np.random.choice(len(src), n_target - len(src), replace=True)
-            src = np.vstack((src, src[extra_idx]))
-
-        for _ in range(max_iters):
-            distances = cdist(src, target)
-            indices = np.argmin(distances, axis=1)
-            correspondence = target[indices]
-            _, src_aligned, _ = procrustes(correspondence, src)
-            src = src_aligned
-
-        return src[:n_target]  # Return exactly the right number of points
-
-    # Subsample more points for better stability (especially on gibbons)
-    sample_size = min(1500, len(verts))
-    sample_idx = np.random.choice(len(verts), size=sample_size, replace=False)
-    sample_points = verts[sample_idx]
-
-    with st.spinner("Running auto-landmarking + classification..."):
-        auto_landmarks = robust_icp(sample_points, mean_shape)
-        _, aligned_landmarks, _ = procrustes(mean_shape, auto_landmarks)
-        features = pca.transform(aligned_landmarks.flatten().reshape(1, -1))
+        aligned = simple_icp(sample, _mean_shape)
+        _, final_landmarks, _ = procrustes(_mean_shape, aligned)
+        features = _pca.transform(final_landmarks.flatten().reshape(1, -1))
 
         # Predictions
-        pred_species = le_species.inverse_transform(model_species.predict(features))[0]
-        pred_sex = "Male" if model_sex.predict(features)[0] == 1 else "Female"
-        pred_side = "Left" if model_side.predict(features)[0] == "L" else "Right"
+        species_pred = le_species.inverse_transform(model_species.predict(features))[0]
+        sex_pred = "Male" if model_sex.predict(features)[0] == 1 else "Female"
+        side_pred = model_side.predict(features)[0]
 
         conf_species = np.max(model_species.predict_proba(features)) * 100
         conf_sex = np.max(model_sex.predict_proba(features)) * 100
         conf_side = np.max(model_side.predict_proba(features)) * 100
 
+        return final_landmarks, species_pred, sex_pred, side_pred, conf_species, conf_sex, conf_side
+
+    with st.spinner("Running auto-landmarking + classification..."):
+        landmarks, species, sex, side, c_sp, c_sex, c_side = auto_landmark_and_predict(verts, mean_shape, pca)
+
     # RESULTS
     col1, col2 = st.columns(2)
     with col1:
-        st.metric("Species", pred_species, f"{conf_species:.1f}% confidence")
-        st.metric("Sex", pred_sex, f"{conf_sex:.1f}% confidence")
+        st.metric("Species", f"{species}", f"{c_sp:.1f}% confidence")
+        st.metric("Sex", sex, f"{c_sex:.1f}% confidence")
     with col2:
-        st.metric("Side", pred_side, f"{conf_side:.1f}% confidence")
+        st.metric("Side", side, f"{c_side:.1f}% confidence")
         st.metric("Bone", bone.capitalize())
 
     # 3D VISUALIZATION
     fig = go.Figure(data=[
         go.Mesh3d(
-            x=verts[::15, 0], y=verts[::15, 1], z=verts[::15, 2],
+            x=verts[::10, 0], y=verts[::10, 1], z=verts[::10, 2],  # decimate for speed
             color='lightgray', opacity=0.4, name='Specimen'
         ),
         go.Scatter3d(
-            x=auto_landmarks[:, 0], y=auto_landmarks[:, 1], z=auto_landmarks[:, 2],
-            mode='markers', marker=dict(size=8, color='red'), name='Auto-landmarks'
+            x=landmarks[:, 0], y=landmarks[:, 1], z=landmarks[:, 2],
+            mode='markers+text', marker=dict(size=6, color='red'), name='Auto-landmarks'
         )
     ])
-    fig.update_layout(scene_aspectmode='data', height=600, title="Uploaded Mesh + Auto-landmarks")
+    fig.update_layout(
+        scene_aspectmode='data',
+        height=600,
+        title="Uploaded Mesh + Detected Landmarks"
+    )
     st.plotly_chart(fig, use_container_width=True)
 
 else:
     st.info("Upload a raw `.ply` file to begin identification")
-    st.markdown("**Supported bones**: Clavicle · Scapula · Humerus  \n**Taxa**: Gorilla, Pan, Pongo, Hylobates, Symphalangus, Papio, Macaca  \nTrained on 555 specimens · Fully automated")
+    st.markdown(
+        """
+        **Supported bones**: Clavicle · Scapula · Humerus  
+        **Taxa included**: Cercopithecus, Gorilla, Hylobates, Macaca, Pan, Pongo, Trachypithecus (n=555)  
+        Trained on landmark data from von Cramon-Taubadel Lab · Fully automated ICP alignment
+        """
+    )
 
 st.markdown("---")
-st.markdown("© 2025 Kevin P. Klier | University at Buffalo BHEML | Dr. Noreen von Cramon-Taubadel")
+st.markdown("© 2023–2025 Kevin P. Klier | Based on M.A. research at University at Buffalo BHEML under Dr. Noreen von Cramon-Taubadel | Supported by NSF")
