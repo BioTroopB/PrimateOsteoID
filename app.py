@@ -130,7 +130,7 @@ else:
     st.markdown(
         """
         **Supported bones**: Clavicle · Scapula · Humerus  
-        **Taxa included**: Cercopithecus, Gorilla, Hylobates, Macaca, Pan, Pongo, Trachypithecus  
+        **Taxa included**: Cercopithecus ascanius, Trachypithecus cristatus, Gorilla gorilla, Hylobates lar, Macaca mulatta, Pongo pygmaeus, Pan troglodytes  
         Fully automated ICP alignment
         """
     )
