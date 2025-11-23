@@ -4,7 +4,7 @@ import trimesh
 import numpy as np
 import pickle
 import plotly.graph_objects as go
-from scipy.spatial.distance import cdist
+from scipy.spatial.distance import cdist, pdist, squareform
 from scipy.spatial import procrustes
 import os
 
@@ -60,6 +60,8 @@ if uploaded_file is not None:
         else:
             bone = "humerus"
         st.info(f"Auto-detected as **{bone.capitalize()}**")
+        if (1800 < len(verts) < 2200) or (5500 < len(verts) < 6500):
+            st.warning("Borderline vertex count—select manually if predictions seem off.")
 
     # Load all models for this bone (cached!)
     mean_shape, model_sex, model_side, model_species, le_species, pca = load_bone_models(bone)
@@ -67,31 +69,63 @@ if uploaded_file is not None:
     # ICP + ALIGNMENT
     @st.cache_data
     def auto_landmark_and_predict(_verts, _mean_shape, _pca):
-        # Subsample for speed
-        idx = np.random.choice(len(_verts), size=min(1000, len(_verts)), replace=False)
-        sample = _verts[idx]
+        # Farthest Point Sampling (FPS) for subsampling
+        def fps(points, n_samples):
+            if len(points) <= n_samples:
+                return points
+            dist_mat = squareform(pdist(points))
+            idx = [np.random.randint(len(points))]
+            for _ in range(1, n_samples):
+                dists = np.min(dist_mat[idx], axis=0)
+                idx.append(np.argmax(dists))
+            return points[np.array(idx)]
 
-        # Simple fast ICP
-        def simple_icp(src, tgt, iters=30):
+        sample_size = min(1000, len(_verts))
+        sample = fps(_verts, sample_size)
+
+        # Initial alignment: center and align principal axes of sample to mean
+        sample -= np.mean(sample, axis=0)
+        mean_centered = _mean_shape - np.mean(_mean_shape, axis=0)
+        U_s, _, Vt_s = np.linalg.svd(sample.T @ sample)
+        U_m, _, Vt_m = np.linalg.svd(mean_centered.T @ mean_centered)
+        R = Vt_m.T @ U_m.T @ U_s @ Vt_s.T  # Approximate rotation
+        if np.linalg.det(R) < 0:
+            Vt_s[2, :] *= -1
+            R = Vt_m.T @ U_m.T @ U_s @ Vt_s.T
+        sample = sample @ R
+
+        # Fixed ICP: align src (mean landmarks) to tgt (sample) to estimate landmarks
+        def simple_icp(src, tgt, iters=50, threshold=1e-5):
             s = src.copy()
+            prev_disp = float('inf')
             for _ in range(iters):
                 dists = cdist(s, tgt)
                 correspondences = tgt[np.argmin(dists, axis=1)]
-                _, s, _ = procrustes(correspondences, s)
+                disp, s, _ = procrustes(s, correspondences)  # Align src to correspondences
+                if abs(prev_disp - disp) < threshold:
+                    break
+                prev_disp = disp
             return s
 
-        aligned = simple_icp(sample, _mean_shape)
+        aligned = simple_icp(_mean_shape, sample)
+
+        # Final GPA to match training
         _, final_landmarks, _ = procrustes(_mean_shape, aligned)
         features = _pca.transform(final_landmarks.flatten().reshape(1, -1))
 
         # Predictions
         species_pred = le_species.inverse_transform(model_species.predict(features))[0]
-        sex_pred = "Male" if model_sex.predict(features)[0] == 1 else "Female"
-        side_pred = model_side.predict(features)[0]
+        sex_raw = model_sex.predict(features)[0]
+        sex_pred = "Male" if sex_raw == 'M' else "Female"
+        side_raw = model_side.predict(features)[0]
+        side_pred = "Left" if side_raw == 'L' else "Right"
 
         conf_species = np.max(model_species.predict_proba(features)) * 100
         conf_sex = np.max(model_sex.predict_proba(features)) * 100
         conf_side = np.max(model_side.predict_proba(features)) * 100
+
+        if conf_species < 70:
+            st.warning("Low confidence—ensure .ply is clean/oriented like training data.")
 
         return final_landmarks, species_pred, sex_pred, side_pred, conf_species, conf_sex, conf_side
 
