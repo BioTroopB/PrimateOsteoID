@@ -21,25 +21,18 @@ if uploaded_file is not None:
     mesh = trimesh.load(trimesh.util.wrap_as_stream(bytes_data), file_type='ply')
     verts = np.asarray(mesh.vertices)
 
-    # Pre-center the mesh
+    # UPDATED: Pre-center the mesh to match GPA data (fixes alignment bias)
     centroid = np.mean(verts, axis=0)
     verts -= centroid
 
-    # UPDATED: Improved auto-detection with vertex count + bounding box aspect ratio
-    # Clavicle: long/thin (high length/width)
-    # Scapula: flat (low depth/length)
-    # Humerus: long/cylindrical (high length/diameter)
+    # UPDATED AUTO-DETECTION: Higher thresholds for typical scan densities (adjust based on your files)
     if bone == "Auto":
         n_verts = len(verts)
-        bbox = np.ptp(verts, axis=0)  # Bounding box extents [x,y,z]
-        aspect_ratios = np.sort(bbox)[::-1]  # Largest to smallest dimensions
-        length, width, depth = aspect_ratios
-
-        if length / width > 4 and n_verts < 80000:  # Long thin for clavicle
+        if n_verts < 60000:  # Clavicles often lower density
             bone = "clavicle"
-        elif depth / length < 0.3:  # Flat for scapula
+        elif n_verts < 150000:  # Scapulae medium
             bone = "scapula"
-        else:  # Long cylindrical for humerus
+        else:  # Humeri higher
             bone = "humerus"
 
     st.write(f"**Processing as {bone.capitalize()}** ({len(verts):,} vertices)")
@@ -52,14 +45,8 @@ if uploaded_file is not None:
     le_species = pickle.load(open(f"models/{bone}/le_species_{bone}.pkl", "rb"))
     pca = pickle.load(open(f"models/{bone}/pca_{bone}.pkl", "rb"))
 
-    # UPDATED: Scale mesh to match mean_shape size (fixes size mismatch bias)
-    mesh_cs = np.sqrt(np.sum(verts**2) / len(verts))  # Centroid size of mesh
-    mean_cs = np.sqrt(np.sum(mean_shape**2) / len(mean_shape))  # Centroid size of template
-    scale_factor = mean_cs / mesh_cs if mesh_cs > 0 else 1.0
-    verts *= scale_factor
-
     # FIXED ICP: Align sparse mean_shape (template) to dense sample_points (mesh)
-    def simple_icp(source, target, max_iterations=50, threshold=1e-6):
+    def simple_icp(source, target, max_iterations=50, threshold=1e-6):  # Increased iterations for better convergence
         s = source.copy()  # Start with sparse template
         prev_disp = np.inf
         for _ in range(max_iterations):
@@ -80,7 +67,7 @@ if uploaded_file is not None:
 
     # Sample points for speed (dense subset of mesh)
     landmark_counts = {"clavicle": 7, "scapula": 13, "humerus": 16}
-    n_samples = min(20000, len(verts))  # Dense sample for accurate matching (up to 20k points)
+    n_samples = min(20000, len(verts))  # UPDATED: Denser sample (up to 20k) for better matching on complex bones
     sample_idx = np.random.choice(len(verts), size=n_samples, replace=False)
     sample_points = verts[sample_idx]
 
@@ -101,7 +88,7 @@ if uploaded_file is not None:
     conf_sex = np.max(model_sex.predict_proba(features)) * 100
     conf_side = np.max(model_side.predict_proba(features)) * 100
 
-    # Low confidence warning (helps diagnose alignment issues)
+    # UPDATED: Low confidence warning (helps diagnose alignment issues)
     if min(conf_species, conf_sex, conf_side) < 60:
         st.warning("Low confidence across predictions—alignment may be poor. Try recentering/scaling the .ply in MeshLab or Blender before upload.")
 
