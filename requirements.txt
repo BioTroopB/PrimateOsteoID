@@ -1,9 +1,8 @@
-streamlit>=1.38.0
-trimesh[all]>=4.0.8
-numpy>=1.26,<2.0
-scipy>=1.13
-scikit-learn>=1.5
-plotly>=5.22
-pandas
-pyyaml
-imbalanced-learn>=0.12
+# OsteoID.ai — pinned requirements (tested Nov 23, 2025)
+streamlit==1.38.0
+trimesh==4.0.10
+plotly==5.24.0
+scikit-learn==1.5.2
+scipy==1.14.1
+numpy==2.1.2
+imblearn==0.12.4
