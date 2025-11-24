@@ -3,123 +3,123 @@ import trimesh
 import numpy as np
 import pickle
 import plotly.graph_objects as go
-from scipy.spatial.distance import cdist
+from trimesh.proximity import closest_point
 from scipy.spatial import procrustes
+import os
 
 st.set_page_config(page_title="OsteoID.ai", layout="centered")
 st.title("OsteoID.ai")
-st.markdown("**Primate Shoulder Bone Classifier-Beta** — Kevin P. Klier")
-st.markdown("Upload any raw .ply file — no landmarking required · Auto-landmarking via ICP")
+st.markdown("**Primate Shoulder Bone Classifier — Beta**  \nKevin P. Klier | University at Buffalo")
 
-bone = st.selectbox("Bone type (or Auto-detect)", ["Auto", "clavicle", "scapula", "humerus"])
-
+bone_choice = st.selectbox("Bone type", ["Auto-detect", "clavicle", "scapula", "humerus"])
 uploaded_file = st.file_uploader("Upload raw .ply file", type="ply")
 
 if uploaded_file is not None:
-    # Load mesh properly
-    bytes_data = uploaded_file.getvalue()
-    mesh = trimesh.load(trimesh.util.wrap_as_stream(bytes_data), file_type='ply')
+    mesh = trimesh.load(trimesh.util.wrap_as_stream(uploaded_file.getvalue()), file_type='ply')
     verts = np.asarray(mesh.vertices)
 
-    # Pre-center the mesh
-    centroid = np.mean(verts, axis=0)
+    if len(verts) < 100:
+        st.error("Invalid or empty mesh.")
+        st.stop()
+
+    centroid = verts.mean(axis=0)
     verts -= centroid
 
-    # UPDATED: Pre-center the mesh to match GPA data (fixes alignment bias)
-    centroid = np.mean(verts, axis=0)
-    verts -= centroid
+    if bone_choice == "Auto-detect":
+        candidates = {}
+        for b in ["clavicle", "scapula", "humerus"]:
+            model_path = f"models/{b}"
+            if not os.path.exists(model_path):
+                continue
+            try:
+                mean_shape = pickle.load(open(f"{model_path}/mean_shape_{b}.pkl", "rb"))
+                pca = pickle.load(open(f"{model_path}/pca_{b}.pkl", "rb"))
+                model_sp = pickle.load(open(f"{model_path}/model_species_{b}.pkl", "rb"))
+                sample = verts[np.random.choice(len(verts), size=min(10000, len(verts)), replace=False)]
+                scaled = sample * (np.linalg.norm(mean_shape) / (np.linalg.norm(sample) + 1e-8))
+                feats = pca.transform(scaled[:mean_shape.shape[0]].flatten().reshape(1, -1))
+                conf = np.max(model_sp.predict_proba(feats))
+                candidates[b] = conf
+            except:
+                continue
+        if candidates:
+            bone = max(candidates, key=candidates.get)
+            st.info(f"Auto-detected: **{bone.capitalize()}**")
+        else:
+            st.error("No models found — run train_all_models.py first.")
+            st.stop()
+    else:
+        bone = bone_choice
 
-    # UPDATED AUTO-DETECTION: Higher thresholds for typical scan densities (adjust based on your files)
-    if bone == "Auto":
-        n_verts = len(verts)
-        if n_verts < 60000:  # Clavicles often lower density
-            bone = "clavicle"
-        elif n_verts < 150000:  # Scapulae medium
-            bone = "scapula"
-        else:  # Humeri higher
-            bone = "humerus"
+    model_dir = f"models/{bone}"
+    if not os.path.exists(model_dir):
+        st.error(f"No model for {bone}. Run train_all_models.py first.")
+        st.stop()
 
-    st.write(f"**Processing as {bone.capitalize()}** ({len(verts):,} vertices)")
+    mean_shape    = pickle.load(open(f"{model_dir}/mean_shape_{bone}.pkl", "rb"))
+    pca           = pickle.load(open(f"{model_dir}/pca_{bone}.pkl", "rb"))
+    model_species = pickle.load(open(f"{model_dir}/model_species_{bone}.pkl", "rb"))
+    model_sex     = pickle.load(open(f"{model_dir}/model_sex_{bone}.pkl", "rb"))
+    model_side    = pickle.load(open(f"{model_dir}/model_side_{bone}.pkl", "rb"))
+    le_species    = pickle.load(open(f"{model_dir}/le_species_{bone}.pkl", "rb"))
 
-    # Load models and mean shape (ignores placeholders.txt)
-    mean_shape = pickle.load(open(f"models/{bone}/mean_shape_{bone}.pkl", "rb"))
-    model_sex = pickle.load(open(f"models/{bone}/model_sex_{bone}.pkl", "rb"))
-    model_side = pickle.load(open(f"models/{bone}/model_side_{bone}.pkl", "rb"))
-    model_species = pickle.load(open(f"models/{bone}/model_species_{bone}.pkl", "rb"))
-    le_species = pickle.load(open(f"models/{bone}/le_species_{bone}.pkl", "rb"))
-    pca = pickle.load(open(f"models/{bone}/pca_{bone}.pkl", "rb"))
+    st.write(f"**Processing as {bone.capitalize()}** — {len(verts):,} vertices")
 
-    # UPDATED: Pre-scale mesh to match mean_shape size (fixes size mismatch bias)
-    mesh_cs = np.sqrt(np.sum(verts**2) / len(verts))  # Centroid size of mesh
-    mean_cs = np.sqrt(np.sum(mean_shape**2) / len(mean_shape))  # Centroid size of template
-    scale_factor = mean_cs / mesh_cs if mesh_cs > 0 else 1.0
-    verts *= scale_factor
+    mesh_cs = np.sqrt(np.sum(verts**2) / len(verts))
+    tmpl_cs = np.sqrt(np.sum(mean_shape**2) / len(mean_shape))
+    verts = verts * (tmpl_cs / mesh_cs if mesh_cs > 0 else 1.0)
 
-    # FIXED ICP: Align sparse mean_shape (template) to dense sample_points (mesh)
-    def simple_icp(source, target, max_iterations=50, threshold=1e-6):  # Increased iterations for better convergence
-        s = source.copy()  # Start with sparse template
-        prev_disp = np.inf
-        for _ in range(max_iterations):
-            dists = cdist(s, target)  # Distance from template to mesh points
-            indices = np.argmin(dists, axis=1)
-            correspondences = target[indices]  # Closest mesh points to template (same size as s)
+    def align_template(template, mesh_pts, max_iter=40):
+        src = template.copy().astype(np.float64)
+        for _ in range(max_iter):
+            closest, _, _ = closest_point(mesh_pts, src)
+            _, src, _ = procrustes(closest, src)
+        return src
 
-            # UPDATED FIX: Jitter if low variance or duplicates (prevents norm=0 and improves robustness)
-            if np.std(correspondences, axis=0).min() < 1e-5 or len(np.unique(correspondences, axis=0)) < source.shape[0]:
-                correspondences += np.random.normal(0, 1e-8, correspondences.shape)  # Tiny noise to ensure variance/uniqueness
+    sample_pts = verts[np.random.choice(len(verts), size=min(20000, len(verts)), replace=False)]
+    aligned_lms = align_template(mean_shape, sample_pts)
+    _, aligned_lms, _ = procrustes(mean_shape, aligned_lms)
 
-            # Align s (template) to correspondences (target points)
-            _, s, disp = procrustes(correspondences, s)
-            if abs(prev_disp - disp) < threshold:
-                break
-            prev_disp = disp
-        return s
+    feats = pca.transform(aligned_lms.flatten().reshape(1, -1))
 
-    # Sample points for speed (dense subset of mesh)
-    landmark_counts = {"clavicle": 7, "scapula": 13, "humerus": 16}
-    n_samples = min(20000, len(verts))  # Dense sample for accurate matching (up to 20k points)
-    sample_idx = np.random.choice(len(verts), size=n_samples, replace=False)
-    sample_points = verts[sample_idx]
+    species_pred = model_species.predict(feats)[0]
+    species_label = le_species.inverse_transform([species_pred])[0]
+    species_proba = model_species.predict_proba(feats)[0]
+    conf_sp = np.max(species_proba) * 100
 
-    # Run ICP: Source=mean_shape (sparse), target=sample_points (dense)
-    auto_landmarks = simple_icp(mean_shape, sample_points)
+    sex_pred = "Male" if model_sex.predict(feats)[0] == "M" else "Female"
+    conf_sex = np.max(model_sex.predict_proba(feats)) * 100
 
-    # Final GPA (both now same shape)
-    _, aligned_landmarks, _ = procrustes(mean_shape, auto_landmarks)
+    side_pred = "Left" if model_side.predict(feats)[0] == "L" else "Right"
+    conf_side = np.max(model_side.predict_proba(feats)) * 100
 
-    # PCA + Predict
-    features = pca.transform(aligned_landmarks.flatten().reshape(1, -1))
-
-    pred_species = le_species.inverse_transform(model_species.predict(features))[0]
-    pred_sex = model_sex.predict(features)[0]
-    pred_side = model_side.predict(features)[0]
-
-    conf_species = np.max(model_species.predict_proba(features)) * 100
-    conf_sex = np.max(model_sex.predict_proba(features)) * 100
-    conf_side = np.max(model_side.predict_proba(features)) * 100
-
-    # Low confidence warning (helps diagnose alignment issues)
-    if min(conf_species, conf_sex, conf_side) < 60:
-        st.warning("Low confidence across predictions—alignment may be poor. Try recentering/scaling the .ply in MeshLab or Blender before upload.")
+    if min(conf_sp, conf_sex, conf_side) < 65:
+        st.warning("Low confidence — alignment may be poor. Try re-centering the scan in MeshLab/Blender.")
 
     st.success(f"**Bone**: {bone.capitalize()}")
-    st.success(f"**Species**: {pred_species} ({conf_species:.1f}% confidence)")
-    st.success(f"**Sex**: {pred_sex} ({conf_sex:.1f}% confidence)")
-    st.success(f"**Side**: {pred_side} ({conf_side:.1f}% confidence)")
+    st.success(f"**Species**: {species_label} ({conf_sp:.1f}% confidence)")
 
-    # 3D view
+    top3_idx = np.argsort(species_proba)[-3:][::-1]
+    st.write("**Top 3 species**")
+    for i in top3_idx:
+        sp = le_species.inverse_transform([i])[0]
+        prob = species_proba[i] * 100
+        st.write(f"• {sp} — {prob:.1f}%")
+
+    st.success(f"**Sex**: {sex_pred} ({conf_sex:.1f}% confidence)")
+    st.success(f"**Side**: {side_pred} ({conf_side:.1f}% confidence)")
+
     fig = go.Figure(data=[
-        go.Mesh3d(x=verts[:,0], y=verts[:,1], z=verts[:,2], color='lightgray', opacity=0.6, name='Mesh'),
-        go.Scatter3d(x=auto_landmarks[:,0], y=auto_landmarks[:,1], z=auto_landmarks[:,2], 
+        go.Mesh3d(x=verts[:,0], y=verts[:,1], z=verts[:,2], color='lightgray', opacity=0.5, name='Bone'),
+        go.Scatter3d(x=aligned_lms[:,0], y=aligned_lms[:,1], z=aligned_lms[:,2],
                      mode='markers', marker=dict(size=8, color='red'), name='Auto-landmarks')
     ])
     fig.update_layout(scene_aspectmode='data', height=700)
     st.plotly_chart(fig, use_container_width=True)
 
 else:
-    st.info("Upload a raw .ply file to see the magic happen")
+    st.info("Upload a raw .ply shoulder bone (clavicle, scapula, or humerus) to begin.")
+    st.markdown("*Non-human primates only · No landmarking required*")
 
 st.markdown("---")
-st.markdown("Kevin P. Klier | 2025")
-st.markdown("Based on M.A. research at University at Buffalo under advisement of Dr. Noreen von Cramon-Taubadel and Dr. Nicholas Holowka")
-st.markdown("Non-human primates only")
+st.caption("Based on M.A. research at University at Buffalo under advisement of Dr. Noreen von Cramon-Taubadel")
