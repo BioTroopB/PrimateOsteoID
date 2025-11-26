@@ -1,3 +1,13 @@
+title: OsteoID.ai
+emoji: 🦴
+colorFrom: blue
+colorTo: green
+sdk: docker
+app_file: app.py
+dockerfile: Dockerfile
+pinned: false
+---
+
 # OsteoID.ai — AI Primate Shoulder Classifier
 
 **M.A. Project Extension – Kevin P. Klier**  
@@ -85,6 +95,4 @@ Data shared with explicit approval from Dr. Noreen von Cramon-Taubadel.
 — **Kevin P. Klier**  
 M.A. Anthropology, University at Buffalo, 2023  
 
-
 ---
-
