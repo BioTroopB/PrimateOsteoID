@@ -2,12 +2,15 @@ import numpy as np
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import LabelEncoder
-from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
 from scipy.spatial import procrustes
 from imblearn.over_sampling import SMOTE
-import pickle
+from skl2onnx import convert_sklearn
+from skl2onnx.common.data_types import FloatTensorType
 from pathlib import Path
+import pickle
+import onnx
 
 def load_morphofile(filepath):
     names, landmarks = [], []
@@ -34,7 +37,7 @@ def load_morphofile(filepath):
     if current_name and current_lms:
         landmarks.append(np.array(current_lms))
         names.append(current_name)
-    print(f"Loaded {len(names)} specimens from {filepath}")
+    print(f"Loaded {len(names)} specimens from {Path(filepath).name}")
     return names, np.stack(landmarks)
 
 def parse_name(name, bone_keyword):
@@ -45,15 +48,14 @@ def parse_name(name, bone_keyword):
     species = '_'.join(parts[:-3])
     return species, sex, side
 
-# ←←← COLAB-FRIENDLY PATHS ←←←
 bones = {
-    "clavicle": {"file": "/content/MorphoFileClavicle_CLEAN.txt",  "keyword": "clavicle"},
-    "scapula":  {" ordin": "/content/MorphoFileScapula_CLEAN.txt",   "keyword": "scapula"},
-    "humerus":  {"file": "/content/MorphoFileHumerus_CLEAN.txt",   "keyword": "humerus"}
+    "clavicle": {"file": Path("/content/MorphoFileClavicle_CLEAN.txt"),  "keyword": "clavicle"},
+    "scapula":  {"file": Path("/content/MorphoFileScapula_CLEAN.txt"),   "keyword": "scapula"},
+    "humerus":  {"file": Path("/content/MorphoFileHumerus_CLEAN.txt"),   "keyword": "humerus"}
 }
 
 for bone, info in bones.items():
-    print(f"\n=== TRAINING {bone.upper()} ===")
+    print(f"\n=== TRAINING {bone.upper()} (ONNX) ===")
     names, landmarks = load_morphofile(info["file"])
     
     species_list, sex_list, side_list = [], [], []
@@ -79,7 +81,7 @@ for bone, info in bones.items():
     flat = aligned.reshape(len(aligned), -1)
     pca = PCA(n_components=12, random_state=42)
     features_raw = pca.fit_transform(flat)
-    features = np.column_stack([features_raw, cs_normalized])
+    features = np.column_stack([features_raw, cs_normalized]).astype(np.float32)
 
     X_tr, X_te, y_sp_tr, y_sp_te, y_sex_tr, y_sex_te, y_side_tr, y_side_te = train_test_split(
         features, species_list, sex_list, side_list,
@@ -104,22 +106,30 @@ for bone, info in bones.items():
     model_side.fit(X_tr, y_side_tr)
     side_acc = accuracy_score(y_side_te, model_side.predict(X_te))
 
-    cv_sex = cross_val_score(model_sex, features, sex_list, cv=5, scoring='accuracy').mean()
-    cv_side = cross_val_score(model_side, features, side_list, cv=5, scoring='accuracy').mean()
-
     print(f"Holdout → Species: {sp_acc:.1%} | Sex: {sex_acc:.1%} | Side: {side_acc:.1%}")
-    print(f"5-fold CV → Sex: {cv_sex:.1%} | Side: {cv_side:.1%}")
 
-    out_dir = Path("models") / bone
+    out_dir = Path("models_onnx") / bone
     out_dir.mkdir(parents=True, exist_ok=True)
+
     pickle.dump(mean_shape, open(out_dir / f"mean_shape_{bone}.pkl", "wb"))
     pickle.dump(pca, open(out_dir / f"pca_{bone}.pkl", "wb"))
-    pickle.dump(model_species, open(out_dir / f"model_species_{bone}.pkl", "wb"))
-    pickle.dump(model_sex, open(out_dir / f"model_sex_{bone}.pkl", "wb"))
-    pickle.dump(model_side, open(out_dir / f"model_side_{bone}.pkl", "wb"))
     pickle.dump(le, open(out_dir / f"le_species_{bone}.pkl", "wb"))
 
-    print(f"Saved models to {out_dir}\n")
+    initial_type = [('float_input', FloatTensorType([None, features.shape[1]]))]
 
-print("ALL DONE — OsteoID.ai is now trained on perfect data.")
-print("You can now download the entire 'models' folder and push to GitHub.")
+    onx_species = convert_sklearn(model_species, initial_types=initial_type, target_opset=18,
+                                  options={type(model_species): {'zipmap': False}})
+    onnx.save(onx_species, out_dir / f"model_species_{bone}.onnx")
+
+    onx_sex = convert_sklearn(model_sex, initial_types=initial_type, target_opset=18,
+                              options={type(model_sex): {'zipmap': False}})
+    onnx.save(onx_sex, out_dir / f"model_sex_{bone}.onnx")
+
+    onx_side = convert_sklearn(model_side, initial_types=initial_type, target_opset=18,
+                               options={type(model_side): {'zipmap': False}})
+    onnx.save(onx_side, out_dir / f"model_side_{bone}.onnx")
+
+    print(f"ONNX models saved to {out_dir}")
+
+print("\nALL DONE — ONNX models ready in models_onnx/")
+print("Now run the two cells below to download models_onnx.zip")
