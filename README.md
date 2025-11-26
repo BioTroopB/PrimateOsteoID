@@ -1,5 +1,5 @@
 ---
-title: OsteoID.ai
+title: PrimateOsteoID.ai
 emoji: 🦴
 colorFrom: blue
 colorTo: green
@@ -9,7 +9,7 @@ dockerfile: Dockerfile
 pinned: false
 ---
 
-# OsteoID.ai — AI Primate Shoulder Classifier
+# PrimateOsteoID.ai — AI Primate Shoulder Classifier
 
 **M.A. Project Extension – Kevin P. Klier**  
 **STEM-Designated Program (DHS CIP 45.0201)**  
