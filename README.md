@@ -11,6 +11,12 @@ pinned: false
 
 # PrimateOsteoID.ai — AI Primate Shoulder Classifier
 
+**Live Demo (v1 — stable public version)**  
+→ https://huggingface.co/spaces/BioTroopB/PrimateOsteoID
+
+**Latest version (v2 — under active refinement)**  
+→ Private (improved auto-landmarking, raw-scan robustness, and outlier rejection)
+
 **M.A. Project Extension – Kevin P. Klier**  
 **STEM-Designated Program (DHS CIP 45.0201)**  
 University at Buffalo    
