@@ -16,38 +16,32 @@ def load_morphofile(filepath):
     names, landmarks = [], []
     current_name = None
     current_lms = []
-    
     with open(filepath, 'r') as f:
-        for raw_line in f:
-            line = raw_line.strip()
-            if not line:
+        for line in f:
+            s = line.strip()
+            if not s:
                 continue
-            if line.startswith("#") or line.startswith("'#"):
+            if s.startswith(('#', "'#")):
                 if current_name and current_lms:
                     landmarks.append(np.array(current_lms))
                     names.append(current_name)
-                current_name = line.lstrip("#' ").strip()
+                current_name = s.lstrip("#' ").strip()
                 current_lms = []
                 continue
-            if line.startswith("[") or line.startswith("]"):
-                continue
             try:
-                coords = [float(x) for x in line.split()]
+                coords = [float(x) for x in s.split()]
                 if len(coords) == 3:
                     current_lms.append(coords)
             except:
-                continue
-    
+                pass
     if current_name and current_lms:
         landmarks.append(np.array(current_lms))
         names.append(current_name)
-        
-    if len(names) == 0:
-        raise ValueError(f"No specimens found in {Path(filepath).name}")
+    print(f"Loaded {len(names)} specimens from {Path(filepath).name}")
     return names, np.stack(landmarks)
 
 def parse_name(name, bone_keyword):
-    parts = name.replace("'", "").split('_')
+    parts = name.split('_')
     bone_idx = parts.index(bone_keyword)
     sex = parts[bone_idx - 1]
     side = parts[-1][-1]
@@ -55,12 +49,13 @@ def parse_name(name, bone_keyword):
     return species, sex, side
 
 bones = {
-    "clavicle": {"file": Path("MorphoFileClavicle_CLEAN.txt"),  "keyword": "clavicle"},
-    "scapula":  {"file": Path("MorphoFileScapula_CLEAN.txt"),   "keyword": "scapula"},
-    "humerus":  {"file": Path("MorphoFileHumerus_CLEAN.txt"),   "keyword": "humerus"}
+    "clavicle": {"file": Path("/content/MorphoFileClavicle_CLEAN.txt"),  "keyword": "clavicle"},
+    "scapula":  {"file": Path("/content/MorphoFileScapula_CLEAN.txt"),   "keyword": "scapula"},
+    "humerus":  {"file": Path("/content/MorphoFileHumerus_CLEAN.txt"),   "keyword": "humerus"}
 }
 
 for bone, info in bones.items():
+    print(f"\n=== TRAINING {bone.upper()} (ONNX) ===")
     names, landmarks = load_morphofile(info["file"])
     
     species_list, sex_list, side_list = [], [], []
@@ -111,6 +106,8 @@ for bone, info in bones.items():
     model_side.fit(X_tr, y_side_tr)
     side_acc = accuracy_score(y_side_te, model_side.predict(X_te))
 
+    print(f"Holdout → Species: {sp_acc:.1%} | Sex: {sex_acc:.1%} | Side: {side_acc:.1%}")
+
     out_dir = Path("models_onnx") / bone
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -131,3 +128,8 @@ for bone, info in bones.items():
     onx_side = convert_sklearn(model_side, initial_types=initial_type, target_opset=18,
                                options={type(model_side): {'zipmap': False}})
     onnx.save(onx_side, out_dir / f"model_side_{bone}.onnx")
+
+    print(f"ONNX models saved to {out_dir}")
+
+print("\nALL DONE — ONNX models ready in models_onnx/")
+print("Now run the two cells below to download models_onnx.zip")
