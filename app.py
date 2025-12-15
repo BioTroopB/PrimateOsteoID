@@ -23,8 +23,8 @@ def load_model_components(bone: str):
     
     return mean_shape, pca, le_species, sess_species, sess_sex, sess_side
 
-st.set_page_config(page_title="OsteoID.ai", layout="centered")
-st.title("OsteoID.ai")
+st.set_page_config(page_title="PrimateOsteoID.ai", layout="centered")
+st.title("PrimateOsteoID.ai")
 st.markdown("**Primate Shoulder Bone Classifier — Beta**  \nKevin P. Klier")
 
 bone_choice = st.selectbox("Bone type", ["Auto-detect", "clavicle", "scapula", "humerus"])
