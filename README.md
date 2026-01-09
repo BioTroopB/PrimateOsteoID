@@ -1,8 +1,11 @@
-# PrimateOsteoID.ai — Iterative AI Non-Human Primate Shoulder Bone Classifier
+# PrimateOsteoID — Iterative AI Non-Human Primate Shoulder Bone Classifier (V1)
 
 **M.A. Project Extension – Kevin P. Klier**  
 **STEM-Designated Program (DHS CIP 45.0201)**  
 University at Buffalo • Buffalo Human Evolutionary Morphology Lab (BHEML)
+
+**⚠️ Important Disclaimer**  
+This is an **experimental research prototype** (V1). Predictions are probabilistic and may be inaccurate. Provided "as is" for demonstration and academic purposes only. Not intended for commercial, forensic, or critical applications. The author assumes no liability for use or results.
 
 ---
 
@@ -25,30 +28,35 @@ The system classifies nonhuman primate shoulder bones by instantly predicting:
 - **Sex** (M/F)  
 - **Side** (L/R)  
 
-Trained exclusively on **555 real museum specimens** (Homo sapiens excluded per ethical guidelines).
+Trained exclusively on **555 real museum specimens** from 7 nonhuman primate taxa (Cercopithecus ascanius, Trachypithecus cristatus, Macaca mulatta, Pan troglodytes, Gorilla gorilla, Pongo pygmaeus, Hylobates lar).
 
-**V3 note**: Upload landmark coordinate files (7 for clavicle, 13 for scapula, 16 for humerus). For raw scans, use V1/V2.
+**Input**: Raw .ply bone scan (V1/V2) or pre-aligned landmark coordinates (V3).  
+**Output**: Instant predictions with confidence scores + interactive 3D visualization (V2/V3).
 
 ---
 
-## Data Summary (Non-Human Primates Only)
+## Data Summary
 
 | Bone     | Specimens | Males | Females | Left | Right |
 |----------|-----------|-------|---------|------|-------|
 | Clavicle | 185       | 92    | 93      | 69   | 116   |
 | Humerus  | 185       | 91    | 94      | 66   | 119   |
-| Scapula  | 185       | 101   | 84      | 88   | 97    |
-| **Total** | **555**   | **284** | **271** | **223** | **332** |
+| Scapula  | 185       | 91    | 94      | 88   | 97    |
+| **Total** | **555**   | **274** | **281** | **223** | **332** |
 
 ---
 
-## Performance Highlights
+## Holdout Test Accuracy (V1)
 
-- **V1 holdout (Nov 2025)**: ~96% overall; 100% scapula bone ID  
-- **V3 holdout (Dec 2025)**: Highly consistent results across bones/species/side  
-- **ScapulaID (PointNet, Dec 2025)**: 89.5% species, 90.3% side  
+**Classical GM pipeline (GPA + PCA + Random Forest)**
 
-> **Sex classification**: ~60–70% across versions reflects low sexual dimorphism in primate shoulder girdles — a known biological constraint, not a model shortcoming.
+| Bone     | Species   | Sex     | Side    |
+|----------|-----------|---------|---------|
+| Clavicle | 89.2%     | 67.6%   | 70.3%   |
+| Scapula | **100.0%**     | 62.2%   | 94.6%   |
+| Humerus | 97.3%     | 62.2%   | 83.8%   |
+
+> **Note on sex classification**: ~60–70% accuracy reflects the known low sexual dimorphism in nonhuman primate shoulder girdles — a biological constraint, not a model shortcoming.
 
 ---
 
