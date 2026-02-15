@@ -1,7 +1,6 @@
 # PrimateOsteoID — Iterative AI Non-Human Primate Shoulder Bone Classifier (V1)
 
-**M.A. Project Extension – Kevin P. Klier**  
-**STEM-Designated Program (DHS CIP 45.0201)**  
+**M.A. Project Extension – Kevin P. Klier**    
 University at Buffalo • Buffalo Human Evolutionary Morphology Lab (BHEML)
 
 **⚠️ Important Disclaimer**  
@@ -121,3 +120,4 @@ Data shared with approval from Dr. Noreen von Cramon-Taubadel.
 
 *"Bridging biological anthropology and artificial intelligence through geometric morphometrics."*  
 — Kevin P. Klier, M.A. Anthropology, University at Buffalo, 2023
+
