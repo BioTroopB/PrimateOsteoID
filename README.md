@@ -6,6 +6,26 @@ Upload a landmark coordinate file (TXT, CSV, or DTA) → instantly predicts **Sp
 
 This is the **production-ready version** of the project. Earlier experimental versions (V1 & V2) that worked with raw 3D scans are no longer maintained.
 
+## How to Use
+
+1. Prepare a landmark coordinate file (TXT, CSV, or DTA) with **exactly** the correct number of landmarks in the correct anatomical order:
+
+   | Bone      | Number of Landmarks | Reference in Thesis                  |
+   |-----------|---------------------|--------------------------------------|
+   | **Clavicle**  | 7                   | Figure 2.1 (page 12)                |
+   | **Scapula**   | 13                  | Figure 2.2 (page 13)                |
+   | **Humerus**   | 16                  | Figure 2.3 (page 14)                |
+
+2. Upload the file to the app
+3. Get instant predictions with confidence scores
+
+**Important**: The order and definitions of the landmarks must match the training data exactly. See the [master's project PDF](masters_project_pectoral_girdle.pdf) for detailed diagrams and descriptions.
+
+**Example files** are included in this repository:
+- `MorphoFileClavicle_CLEAN.txt`
+- `MorphoFileScapula_CLEAN.txt`
+- `MorphoFileHumerus_CLEAN.txt`
+
 ## Accuracy (Holdout Test)
 
 | Bone       | Species   | Sex    | Side   |
@@ -16,16 +36,9 @@ This is the **production-ready version** of the project. Earlier experimental ve
 
 > **Note on Sex Accuracy**: ~60–70% reflects the known low sexual dimorphism in nonhuman primate shoulder girdles — a biological reality, not a model limitation.
 
-## How to Use
+## Live Demo
 
-1. Prepare a landmark coordinate file with the correct number of landmarks:
-   - **Clavicle**: 7 landmarks
-   - **Scapula**: 13 landmarks
-   - **Humerus**: 16 landmarks
-2. Upload the file to the app
-3. Get instant predictions with confidence scores
-
-**Live Demo**: [PrimateOsteoID V3 on Hugging Face](https://huggingface.co/spaces/BioTroopB/PrimateOsteoID-V3)
+→ [PrimateOsteoID V3 on Hugging Face](https://huggingface.co/spaces/BioTroopB/PrimateOsteoID-V3)
 
 ## Data Summary
 
