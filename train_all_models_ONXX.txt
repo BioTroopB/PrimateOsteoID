@@ -1,0 +1,161 @@
+import numpy as np
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.decomposition import PCA
+from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score
+from scipy.spatial import procrustes
+from imblearn.over_sampling import SMOTE
+from skl2onnx import convert_sklearn
+from skl2onnx.common.data_types import FloatTensorType
+from pathlib import Path
+import pickle
+import onnx
+
+def load_morphofile(filepath):
+    names, landmarks = [], []
+    current_name = None
+    current_lms = []
+    with open(filepath, 'r') as f:
+        for line in f:
+            s = line.strip()
+            if not s:
+                continue
+            if s.startswith(('#', "'#")):
+                if current_name and current_lms:
+                    landmarks.append(np.array(current_lms))
+                    names.append(current_name)
+                current_name = s.lstrip("#' ").strip()
+                current_lms = []
+                continue
+            try:
+                coords = [float(x) for x in s.split() if x]
+                if len(coords) == 3:
+                    current_lms.append(coords)
+            except:
+                pass
+    if current_name and current_lms:
+        landmarks.append(np.array(current_lms))
+        names.append(current_name)
+    return names, np.stack(landmarks) if landmarks else np.empty((0, 0, 3))
+
+def parse_name(name):
+    clean = name.strip("'")
+    parts = clean.split('_')
+    species = '_'.join(parts[:-3])
+    sex = parts[-3]
+    bone = parts[-2]
+    side = parts[-1]
+    return species, sex, side
+
+bones = {
+    "clavicle": "MorphoFileClavicle_CLEAN.txt",
+    "scapula":  "MorphoFileScapula_CLEAN.txt",
+    "humerus":  "MorphoFileHumerus_CLEAN.txt"
+}
+
+for bone, filepath in bones.items():
+    print(f"\n=== TRAINING {bone.upper()} (ONNX EXPORT) ===")
+    names, landmarks = load_morphofile(filepath)
+    
+    species_list, sex_list, side_list = [], [], []
+    for n in names:
+        sp, sex, side = parse_name(n)
+        species_list.append(sp)
+        sex_list.append(sex)
+        side_list.append(side.upper())
+
+    mirrored = landmarks.copy()
+    for i, side in enumerate(side_list):
+        if side == 'L':
+            mirrored[i][:, 0] *= -1
+
+    mean_shape = np.mean(mirrored, axis=0)
+    
+    tolerance = 1e-6
+    max_iters = 100
+    prev_disparity = np.inf
+    for iter in range(max_iters):
+        aligned = np.zeros_like(mirrored)
+        total_disparity = 0
+        for i in range(len(mirrored)):
+            mtx1, mtx2, disparity = procrustes(mean_shape, mirrored[i])
+            aligned[i] = mtx2
+            total_disparity += disparity
+        
+        new_mean = np.mean(aligned, axis=0)
+        
+        if abs(prev_disparity - total_disparity) < tolerance:
+            print(f"GPA converged after {iter+1} iterations")
+            break
+        prev_disparity = total_disparity
+        mean_shape = new_mean
+    else:
+        print(f"GPA did not converge after {max_iters} iterations")
+
+    centroid_sizes = []
+    for lm in mirrored:
+        centroid_sizes.append(np.sqrt(np.sum((lm - np.mean(lm, axis=0))**2)))
+
+    centroid_sizes = np.array(centroid_sizes)
+    cs_scaler = StandardScaler()
+    cs_normalized = cs_scaler.fit_transform(centroid_sizes.reshape(-1, 1)).ravel()
+
+    flat = aligned.reshape(len(aligned), -1)
+    n_components = min(20, flat.shape[1] // 3 - 1)
+    pca = PCA(n_components=n_components, random_state=42)
+    features_pca = pca.fit_transform(flat)
+    
+    features = np.column_stack([features_pca, cs_normalized]).astype(np.float32)
+
+    X_train, X_test, y_sp_train, y_sp_test, y_sex_train, y_sex_test, y_side_train, y_side_test = train_test_split(
+        features, species_list, sex_list, side_list,
+        test_size=0.2, random_state=42, stratify=species_list
+    )
+
+    le_species = LabelEncoder()
+    y_sp_train_enc = le_species.fit_transform(y_sp_train)
+    X_res, y_res = SMOTE(random_state=42).fit_resample(X_train, y_sp_train_enc)
+    
+    model_species = RandomForestClassifier(
+        n_estimators=1200, class_weight='balanced', random_state=42, n_jobs=-1
+    )
+    model_species.fit(X_res, y_res)
+    sp_pred = model_species.predict(X_test)
+    sp_acc = accuracy_score(le_species.transform(y_sp_test), sp_pred)
+
+    model_sex = RandomForestClassifier(
+        n_estimators=1000, class_weight='balanced', random_state=42, n_jobs=-1
+    )
+    model_sex.fit(X_train, y_sex_train)
+    sex_acc = accuracy_score(y_sex_test, model_sex.predict(X_test))
+
+    model_side = RandomForestClassifier(
+        n_estimators=800, class_weight='balanced', random_state=42, n_jobs=-1
+    )
+    model_side.fit(X_train, y_side_train)
+    side_acc = accuracy_score(y_side_test, model_side.predict(X_test))
+
+    print(f"Holdout → Species: {sp_acc:.1%} | Sex: {sex_acc:.1%} | Side: {side_acc:.1%}")
+
+    out_dir = Path("models_onnx") / bone
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    pickle.dump(mean_shape, open(out_dir / f"mean_shape_{bone}.pkl", "wb"))
+    pickle.dump(pca, open(out_dir / f"pca_{bone}.pkl", "wb"))
+    pickle.dump(le_species, open(out_dir / f"le_species_{bone}.pkl", "wb"))
+    pickle.dump(cs_scaler, open(out_dir / f"cs_scaler_{bone}.pkl", "wb"))
+
+    initial_type = [('float_input', FloatTensorType([None, features.shape[1]]))]
+
+    for model, name in [(model_species, "species"), (model_sex, "sex"), (model_side, "side")]:
+        onx = convert_sklearn(
+            model, initial_types=initial_type, target_opset=18,
+            options={type(model): {'zipmap': False}}
+        )
+        onnx.save(onx, out_dir / f"model_{name}_{bone}.onnx")
+
+    print(f"Models and preprocessors saved to {out_dir}")
+
+print("\nALL DONE — Classical ML models (RF) trained and exported to ONNX")
+print("Preprocessors (mean_shape, pca, scaler, label encoder) saved for inference")
