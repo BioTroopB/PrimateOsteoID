@@ -8,7 +8,7 @@ This is the **production-ready version** of the project. Earlier experimental ve
 
 ## How to Use
 
-1. Prepare a landmark coordinate file (TXT, CSV, or DTA) with **exactly** the correct number of landmarks in the correct anatomical order:
+1. Prepare a landmark coordinate file with **exactly** the correct number of landmarks:
 
    | Bone      | Number of Landmarks | Reference in Thesis                  |
    |-----------|---------------------|--------------------------------------|
@@ -16,10 +16,17 @@ This is the **production-ready version** of the project. Earlier experimental ve
    | **Scapula**   | 13                  | Figure 2.2 (page 13)                |
    | **Humerus**   | 16                  | Figure 2.3 (page 14)                |
 
-2. Upload the file to the app
-3. Get instant predictions with confidence scores
+2. **Recommended file formats**:  
+   - `.txt` (space-separated) ← **Best choice**  
+   - `.csv` (comma-separated) ← **Also excellent**  
+   - `.dta` (Stata format) ← Works but may have issues with newer Stata versions
 
-**Important**: The order and definitions of the landmarks must match the training data exactly. See the [master's project PDF](masters_project_pectoral_girdle.pdf) for detailed diagrams and descriptions.
+3. Upload the file to the app
+4. Get instant predictions with confidence scores
+
+**Important**: The order and definitions of the landmarks must match the training data exactly. See the [master's project PDF](masters_project_pectoral_girdle.pdf) for detailed diagrams.
+
+**Tip**: If you have a `.dta` file saved in a very new Stata version and it doesn’t work, please re-save it in **Stata 13 or 14** format, or convert it to `.txt` / `.csv`.
 
 **Example files** are included in this repository:
 - `MorphoFileClavicle_CLEAN.txt`
