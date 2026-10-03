@@ -59,7 +59,18 @@ This is the **production-ready version** of the project. Earlier experimental ve
 - **555 specimens** from 7 nonhuman primate taxa
 - **Clavicle**: 185 | **Scapula**: 185 | **Humerus**: 185
 - All data fully anonymized (internal IDs only — no museum accession numbers visible)
-- Trained exclusively on **landmark coordinate data** (no raw 3D scans)
+- **Classifier trained exclusively on Morphologika-style landmark coordinate data** (3D point configurations), not on raw mesh / `.ply` scans
+
+### Lab data constraint (why landmark-in, not `.ply`-in)
+
+Labeled 3D surface scans (`.ply`) exist for these specimens, but **Buffalo Human Evolutionary Morphology Lab (BHEML) instruction prohibits training AI models on that mesh / scan data** (and bars use of human data). For that reason:
+
+- All production models in V3 are trained only on **landmark coordinate tables** derived under lab protocols
+- Raw scans are **not** used as training input for the classifier or for a learned auto-landmarker
+- Earlier experiments that tried raw-scan / auto-landmark paths (V1, V2, ScapulaID) are **unmaintained** and are not the supported workflow
+- A future “upload `.ply` → auto-landmarks → classify” front-end would require either a change in that lab rule or an approved landmarking dataset/tool that is **not** trained on the barred BHEML scans
+
+This is a **data-use constraint**, not a claim that mesh landmarking is impossible in general.
 
 ---
 
